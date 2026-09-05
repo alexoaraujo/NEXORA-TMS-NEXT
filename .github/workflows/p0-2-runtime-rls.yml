@@ -28,10 +28,10 @@ jobs:
           cache: pnpm
       - name: Require runtime database secret
         run: test -n "$DATABASE_URL"
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Verify runtime role without exposing credentials
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "select current_user || '|' || rolsuper || '|' || rolbypassrls from pg_roles where rolname=current_user" | grep -Fx 'nexora_runtime_test|f|f'
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Run behavioral PostgreSQL/RLS gate
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/tests/p0_2_runtime_rls.sql
