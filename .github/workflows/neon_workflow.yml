@@ -35,6 +35,9 @@ jobs:
       || github.event.action == 'reopened')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Get branch expiration date as an env variable (2 weeks from now)
         id: get_expiration_date
         run: echo "EXPIRES_AT=$(date -u --date '+14 days' +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
@@ -66,7 +69,13 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$DATABASE_URL"
-          for migration in database/migrations/*.sql; do
+          shopt -s nullglob
+          migrations=(database/migrations/*.sql)
+          test "${#migrations[@]}" -gt 0 || {
+            echo 'No SQL migrations found in database/migrations'
+            exit 1
+          }
+          for migration in "${migrations[@]}"; do
             echo "Applying $migration"
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
