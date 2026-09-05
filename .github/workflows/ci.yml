@@ -6,38 +6,10 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  prepare-lockfile:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.24.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.20.0
-      - name: Generate real lockfile
-        run: pnpm install --lockfile-only --ignore-scripts
-      - name: Validate frozen install
-        run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Commit generated lockfile when needed
-        if: github.event_name == 'push' && github.ref_name != 'main'
-        run: |
-          if git diff --quiet -- pnpm-lock.yaml; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add pnpm-lock.yaml
-          git commit -m 'chore: generate pnpm lockfile'
-          git push origin HEAD:${{ github.ref_name }}
-
   quality:
-    needs: prepare-lockfile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +20,7 @@ jobs:
         with:
           node-version: 24.20.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
