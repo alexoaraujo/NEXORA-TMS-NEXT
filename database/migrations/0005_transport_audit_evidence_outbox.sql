@@ -1,69 +1,70 @@
 BEGIN;
 
-CREATE SCHEMA IF NOT EXISTS audit;
-CREATE SCHEMA IF NOT EXISTS evidence;
-CREATE SCHEMA IF NOT EXISTS outbox;
+-- Canonical audit/evidence/outbox objects are created by 0001_foundation.sql.
+-- This migration only adds P0.2 hardening and indexes; it must not create
+-- competing audit.audit_event, outbox.event, or evidence.evidence tables.
+DO $$
+BEGIN
+  IF to_regclass('audit.event') IS NULL THEN
+    RAISE EXCEPTION 'audit.event must be created by 0001_foundation.sql';
+  END IF;
+  IF to_regclass('evidence.package') IS NULL THEN
+    RAISE EXCEPTION 'evidence.package must be created by 0001_foundation.sql';
+  END IF;
+  IF to_regclass('evidence.item') IS NULL THEN
+    RAISE EXCEPTION 'evidence.item must be created by 0001_foundation.sql';
+  END IF;
+  IF to_regclass('event.outbox') IS NULL THEN
+    RAISE EXCEPTION 'event.outbox must be created by 0001_foundation.sql';
+  END IF;
+END
+$$;
 
-CREATE TABLE IF NOT EXISTS audit.audit_event (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL REFERENCES identity.tenant(id),
-  aggregate_type text NOT NULL,
-  aggregate_id uuid NOT NULL,
-  action text NOT NULL,
-  actor_id text,
-  occurred_at timestamptz NOT NULL DEFAULT now(),
-  payload jsonb NOT NULL DEFAULT '{}'::jsonb
-);
+CREATE INDEX idx_evidence_item_package
+  ON evidence.item (package_id);
 
-CREATE TABLE IF NOT EXISTS evidence.evidence (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL REFERENCES identity.tenant(id),
-  aggregate_type text NOT NULL,
-  aggregate_id uuid NOT NULL,
-  evidence_type text NOT NULL,
-  content_hash text NOT NULL,
-  uri text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id, content_hash)
-);
+CREATE INDEX idx_evidence_package_subject
+  ON evidence.package (tenant_id, subject_type, subject_id);
 
-CREATE TABLE IF NOT EXISTS outbox.event (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL REFERENCES identity.tenant(id),
-  aggregate_type text NOT NULL,
-  aggregate_id uuid NOT NULL,
-  event_type text NOT NULL,
-  idempotency_key text NOT NULL,
-  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  published_at timestamptz,
-  UNIQUE (tenant_id, idempotency_key)
-);
+CREATE INDEX idx_event_outbox_pending
+  ON event.outbox (occurred_at)
+  WHERE published_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_audit_event_tenant_aggregate ON audit.audit_event (tenant_id, aggregate_type, aggregate_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_tenant_aggregate ON evidence.evidence (tenant_id, aggregate_type, aggregate_id);
-CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox.event (tenant_id, published_at, created_at);
+CREATE INDEX idx_audit_event_entity
+  ON audit.event (tenant_id, entity_type, entity_id, occurred_at);
 
-ALTER TABLE audit.audit_event ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit.audit_event FORCE ROW LEVEL SECURITY;
-ALTER TABLE evidence.evidence ENABLE ROW LEVEL SECURITY;
-ALTER TABLE evidence.evidence FORCE ROW LEVEL SECURITY;
-ALTER TABLE outbox.event ENABLE ROW LEVEL SECURITY;
-ALTER TABLE outbox.event FORCE ROW LEVEL SECURITY;
+ALTER TABLE evidence.item ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evidence.item FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS audit_event_tenant_isolation ON audit.audit_event;
-CREATE POLICY audit_event_tenant_isolation ON audit.audit_event FOR ALL
-  USING (tenant_id = identity.current_tenant_id())
-  WITH CHECK (tenant_id = identity.require_tenant_context());
+DROP POLICY IF EXISTS evidence_item_tenant_isolation ON evidence.item;
+CREATE POLICY evidence_item_tenant_isolation ON evidence.item
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM evidence.package p
+      WHERE p.id = evidence.item.package_id
+        AND p.tenant_id = identity.current_tenant_id()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM evidence.package p
+      WHERE p.id = evidence.item.package_id
+        AND p.tenant_id = identity.require_tenant_context()
+    )
+  );
 
-DROP POLICY IF EXISTS evidence_tenant_isolation ON evidence.evidence;
-CREATE POLICY evidence_tenant_isolation ON evidence.evidence FOR ALL
-  USING (tenant_id = identity.current_tenant_id())
-  WITH CHECK (tenant_id = identity.require_tenant_context());
-
-DROP POLICY IF EXISTS outbox_event_tenant_isolation ON outbox.event;
-CREATE POLICY outbox_event_tenant_isolation ON outbox.event FOR ALL
-  USING (tenant_id = identity.current_tenant_id())
-  WITH CHECK (tenant_id = identity.require_tenant_context());
+-- Legacy competing objects are prohibited. If they exist in a supposedly
+-- clean baseline, fail instead of silently carrying two data models.
+DO $$
+BEGIN
+  IF to_regclass('audit.audit_event') IS NOT NULL
+     OR to_regclass('outbox.event') IS NOT NULL
+     OR to_regclass('evidence.evidence') IS NOT NULL THEN
+    RAISE EXCEPTION 'legacy competing audit/outbox/evidence objects detected';
+  END IF;
+END
+$$;
 
 COMMIT;
