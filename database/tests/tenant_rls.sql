@@ -1,6 +1,7 @@
--- P0.1 acceptance test script.
--- Execute against an isolated test database after migrations 0001 and 0002.
--- The assertions intentionally test both visibility and write protection.
+\set ON_ERROR_STOP on
+
+-- P0.1 acceptance test. Execute against an isolated database after 0001 and 0002.
+-- The test owns its fixtures and rolls them back at the end.
 
 BEGIN;
 
@@ -16,17 +17,30 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000002', true)
 INSERT INTO party.party (tenant_id, type, legal_name, tax_id)
 VALUES ('00000000-0000-0000-0000-000000000002', 'CUSTOMER', 'B Test', 'B-TEST');
 
--- Cross-tenant read must return only Tenant B's row.
-SELECT count(*) AS visible_rows FROM party.party;
--- Expected: 1
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM party.party) <> 1 THEN
+    RAISE EXCEPTION 'Tenant B must see exactly one party row';
+  END IF;
 
--- Cross-tenant direct update must affect zero rows.
+  IF (SELECT count(*) FROM party.party WHERE tenant_id='00000000-0000-0000-0000-000000000001') <> 0 THEN
+    RAISE EXCEPTION 'Tenant B can see Tenant A rows';
+  END IF;
+END
+$$;
+
 UPDATE party.party
 SET legal_name = 'MUST NOT CHANGE'
 WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
--- Expected: UPDATE 0
 
--- A write claiming Tenant A while context is Tenant B must be rejected by WITH CHECK.
+DO $$
+BEGIN
+  IF FOUND THEN
+    RAISE EXCEPTION 'FAIL: cross-tenant update affected a row';
+  END IF;
+END
+$$;
+
 DO $$
 BEGIN
   BEGIN
@@ -36,9 +50,9 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
   END;
-END $$;
+END
+$$;
 
--- Missing context must reject tenant-owned writes.
 SELECT set_config('app.tenant_id', '', true);
 DO $$
 BEGIN
@@ -49,6 +63,8 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
   END;
-END $$;
+END
+$$;
 
 ROLLBACK;
+\echo 'P0.1 tenant RLS suite: PASS'
