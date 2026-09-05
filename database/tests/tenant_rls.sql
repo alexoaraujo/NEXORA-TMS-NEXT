@@ -29,14 +29,16 @@ BEGIN
 END
 $$;
 
-UPDATE party.party
-SET legal_name = 'MUST NOT CHANGE'
-WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
-
 DO $$
+DECLARE
+  affected integer;
 BEGIN
-  IF FOUND THEN
-    RAISE EXCEPTION 'FAIL: cross-tenant update affected a row';
+  UPDATE party.party
+  SET legal_name = 'MUST NOT CHANGE'
+  WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  IF affected <> 0 THEN
+    RAISE EXCEPTION 'FAIL: cross-tenant update affected % rows', affected;
   END IF;
 END
 $$;
