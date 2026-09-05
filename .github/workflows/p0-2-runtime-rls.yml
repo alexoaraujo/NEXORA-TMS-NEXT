@@ -1,0 +1,44 @@
+name: P0.2 Runtime RLS
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-rls:
+    name: p0-2-runtime-rls
+    runs-on: ubuntu-latest
+    env:
+      P0_2_DATABASE_URL: ${{ secrets.NEXORA_RUNTIME_TEST_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require runtime database secret
+        shell: bash
+        run: |
+          test -n "$P0_2_DATABASE_URL" || {
+            echo 'Missing GitHub secret NEXORA_RUNTIME_TEST_DATABASE_URL'
+            exit 1
+          }
+          case "$P0_2_DATABASE_URL" in
+            *nexora_runtime_test*) ;;
+            *) echo 'Configured URL does not identify nexora_runtime_test'; exit 1 ;;
+          esac
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Run behavioral RLS suite
+        env:
+          PGCONNECT_TIMEOUT: 10
+        run: |
+          set -euo pipefail
+          psql "$P0_2_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/tests/p0_2_runtime_rls.sql
+
+      - name: Verify no test secret material is committed
+        run: |
+          ! grep -RInE '(postgres(ql)?://[^[:space:]]+:[^[:space:]]+@|BEGIN (RSA|OPENSSH) PRIVATE KEY|AKIA[0-9A-Z]{16})' --exclude-dir=.git .
