@@ -53,21 +53,9 @@ CREATE TEMP TABLE p0_2_ids(id uuid, tenant_id uuid) ON COMMIT DROP;
 SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true);
 WITH ins AS (
   INSERT INTO transport.order(
-    tenant_id,
-    origin_city,
-    origin_state,
-    destination_city,
-    destination_state,
-    status
+    tenant_id, origin_city, origin_state, destination_city, destination_state, status
   )
-  VALUES (
-    identity.current_tenant_id(),
-    'Santos',
-    'SP',
-    'São Paulo',
-    'SP',
-    'DRAFT'
-  )
+  VALUES (identity.current_tenant_id(), 'Santos', 'SP', 'São Paulo', 'SP', 'DRAFT')
   RETURNING id, tenant_id
 )
 INSERT INTO p0_2_ids SELECT * FROM ins;
@@ -155,25 +143,21 @@ $$;
 
 CREATE TEMP TABLE p0_2_evidence(package_id uuid, item_id uuid) ON COMMIT DROP;
 
-WITH new_package AS (
-  INSERT INTO evidence.package (tenant_id, subject_type, subject_id)
-  VALUES (identity.current_tenant_id(), 'transport.order', (SELECT id FROM p0_2_ids))
-  RETURNING id
-), new_item AS (
-  INSERT INTO evidence.item (package_id, evidence_type, source_type, source_uri)
-  SELECT id, 'TEST', 'TEST', 'test://p0-2'
-  FROM new_package
-  RETURNING id, package_id
-)
-INSERT INTO p0_2_evidence(package_id, item_id)
-SELECT package_id, id FROM new_item;
+INSERT INTO evidence.package (tenant_id, subject_type, subject_id)
+VALUES (identity.current_tenant_id(), 'transport.order', (SELECT id FROM p0_2_ids))
+RETURNING id INTO TEMP TABLE p0_2_new_package;
+
+INSERT INTO evidence.item (package_id, evidence_type, source_type, source_uri)
+SELECT id, 'TEST', 'TEST', 'test://p0-2'
+FROM p0_2_new_package
+RETURNING id, package_id;
 
 DO $$
 BEGIN
-  IF (SELECT count(*) FROM evidence.package WHERE id=(SELECT package_id FROM p0_2_evidence)) <> 1 THEN
+  IF (SELECT count(*) FROM evidence.package WHERE id=(SELECT id FROM p0_2_new_package)) <> 1 THEN
     RAISE EXCEPTION 'canonical evidence.package missing';
   END IF;
-  IF (SELECT count(*) FROM evidence.item WHERE id=(SELECT item_id FROM p0_2_evidence)) <> 1 THEN
+  IF (SELECT count(*) FROM evidence.item WHERE package_id=(SELECT id FROM p0_2_new_package)) <> 1 THEN
     RAISE EXCEPTION 'canonical evidence.item missing';
   END IF;
 END
@@ -182,17 +166,13 @@ $$;
 INSERT INTO integration.idempotency_key (
   tenant_id, key, endpoint, request_hash, response_status, response_body
 )
-VALUES (
-  identity.current_tenant_id(), 'p0-2-idempotency', 'test://p0-2', 'hash-1', 200, '{}'::jsonb
-)
+VALUES (identity.current_tenant_id(), 'p0-2-idempotency', 'test://p0-2', 'hash-1', 200, '{}'::jsonb)
 ON CONFLICT (tenant_id, key, endpoint) DO NOTHING;
 
 INSERT INTO integration.idempotency_key (
   tenant_id, key, endpoint, request_hash, response_status, response_body
 )
-VALUES (
-  identity.current_tenant_id(), 'p0-2-idempotency', 'test://p0-2', 'hash-1', 200, '{}'::jsonb
-)
+VALUES (identity.current_tenant_id(), 'p0-2-idempotency', 'test://p0-2', 'hash-1', 200, '{}'::jsonb)
 ON CONFLICT (tenant_id, key, endpoint) DO NOTHING;
 
 DO $$
