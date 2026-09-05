@@ -1,25 +1,36 @@
 BEGIN;
 
-CREATE SCHEMA IF NOT EXISTS transport;
+-- transport.order is defined canonically by 0001_foundation.sql.
+-- This migration must evolve that table, never redefine it with a reduced shape.
+DO $$
+BEGIN
+  IF to_regclass('transport.order') IS NULL THEN
+    RAISE EXCEPTION 'transport.order must be created by 0001_foundation.sql';
+  END IF;
+END
+$$;
 
-CREATE TABLE IF NOT EXISTS transport.order (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL REFERENCES identity.tenant(id),
-  status text NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PLANNED','CANCELLED')),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_transport_order_tenant_status
+CREATE INDEX idx_transport_order_tenant_status
   ON transport.order (tenant_id, status);
 
 ALTER TABLE transport.order ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transport.order FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS transport_order_tenant_isolation ON transport.order;
-CREATE POLICY transport_order_tenant_isolation ON transport.order
-  FOR ALL
-  USING (tenant_id = identity.current_tenant_id())
-  WITH CHECK (tenant_id = identity.require_tenant_context());
+
+-- 0002 is the canonical owner of the transport.order tenant policy.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'transport'
+      AND tablename = 'order'
+      AND policyname = 'order_tenant_isolation'
+  ) THEN
+    RAISE EXCEPTION 'canonical order_tenant_isolation policy from 0002 is missing';
+  END IF;
+END
+$$;
 
 COMMIT;
