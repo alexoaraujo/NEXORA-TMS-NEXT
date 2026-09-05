@@ -1,0 +1,102 @@
+name: Create/Delete Branch for Pull Request
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  setup:
+    name: Setup
+    outputs:
+      branch: ${{ steps.branch_name.outputs.current_branch }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get branch name
+        id: branch_name
+        uses: tj-actions/branch-names@v8
+
+  create_neon_branch:
+    name: Create Neon Branch
+    outputs:
+      db_url: ${{ steps.create_neon_branch.outputs.db_url }}
+      db_url_with_pooler: ${{ steps.create_neon_branch.outputs.db_url_with_pooler }}
+    needs: setup
+    if: |
+      github.event_name == 'pull_request' && (
+      github.event.action == 'synchronize'
+      || github.event.action == 'opened'
+      || github.event.action == 'reopened')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get branch expiration date as an env variable (2 weeks from now)
+        id: get_expiration_date
+        run: echo "EXPIRES_AT=$(date -u --date '+14 days' +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+      - name: Create Neon Branch
+        id: create_neon_branch
+        uses: neondatabase/create-branch-action@v6
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          expires_at: ${{ env.EXPIRES_AT }}
+          database: nexora_tms_next
+          role: nexora_tms_next_owner
+          prisma: false
+          branch_type: default
+          ssl: require
+          suspend_timeout: 0
+          get_auth_url: false
+          get_data_api_url: false
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Prepare preview database
+        env:
+          DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL"
+
+          if psql "$DATABASE_URL" -Atqc "SELECT to_regclass('identity.tenant') IS NOT NULL" | grep -qx t; then
+            echo 'Existing Neon branch baseline detected; do not replay foundation migrations.'
+            echo 'Applying only the idempotent runtime-role binding required by P0.2.'
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0007_p0_2_runtime_role_binding.sql
+          else
+            echo 'Empty Neon database detected; applying migrations in order.'
+            shopt -s nullglob
+            migrations=(database/migrations/*.sql)
+            test "${#migrations[@]}" -gt 0 || {
+              echo 'No SQL migrations found in database/migrations'
+              exit 1
+            }
+            for migration in "${migrations[@]}"; do
+              echo "Applying $migration"
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+            done
+          fi
+
+  delete_neon_branch:
+    name: Delete Neon Branch
+    needs: setup
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Neon Branch
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
+          api_key: ${{ secrets.NEON_API_KEY }}
