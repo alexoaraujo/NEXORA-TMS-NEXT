@@ -42,9 +42,6 @@ AS $$
   );
 $$;
 
-REVOKE ALL ON FUNCTION identity.package_belongs_to_current_tenant(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION identity.package_belongs_to_current_tenant(uuid) TO nexora_app;
-
 ALTER TABLE party.party ENABLE ROW LEVEL SECURITY;
 ALTER TABLE party.carrier ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fleet.driver ENABLE ROW LEVEL SECURITY;
