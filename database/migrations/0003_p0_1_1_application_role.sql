@@ -1,14 +1,16 @@
 BEGIN;
 
 -- Neon role administration is an infrastructure concern. The database
--- migration must validate the pre-provisioned nexora_app role instead of
+-- migration validates the pre-provisioned nexora_app role instead of
 -- attempting CREATE/ALTER ROLE with a database owner that may not have
--- CREATEROLE privileges.
+-- CREATEROLE privileges. NOINHERIT is not required for this role because it
+-- is not itself a member of another role; the runtime login role explicitly
+-- uses SET ROLE nexora_app.
 DO $$
 DECLARE
   r record;
 BEGIN
-  SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
+  SELECT rolsuper, rolcreaterole, rolcreatedb, rolcanlogin,
          rolreplication, rolbypassrls
     INTO r
   FROM pg_roles
@@ -19,7 +21,7 @@ BEGIN
   END IF;
 
   IF r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolcanlogin
-     OR r.rolreplication OR r.rolbypassrls OR r.rolinherit THEN
+     OR r.rolreplication OR r.rolbypassrls THEN
     RAISE EXCEPTION 'nexora_app has invalid security attributes';
   END IF;
 END
