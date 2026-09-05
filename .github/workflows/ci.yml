@@ -19,7 +19,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
-          cache: pnpm
       - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm lint
       - run: pnpm typecheck
