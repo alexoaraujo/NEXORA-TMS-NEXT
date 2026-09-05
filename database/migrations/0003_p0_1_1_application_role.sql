@@ -12,6 +12,9 @@ BEGIN
 END
 $role$;
 
+REVOKE ALL ON FUNCTION identity.package_belongs_to_current_tenant(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION identity.package_belongs_to_current_tenant(uuid) TO nexora_app;
+
 -- Defense in depth: every tenant-scoped object is forced through RLS.
 ALTER TABLE party.party FORCE ROW LEVEL SECURITY;
 ALTER TABLE party.carrier FORCE ROW LEVEL SECURITY;
