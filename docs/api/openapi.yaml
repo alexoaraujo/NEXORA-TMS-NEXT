@@ -1,0 +1,118 @@
+openapi: 3.1.0
+info:
+  title: NEXORA TMS NEXT API
+  version: 0.1.0
+  description: Evidence-first, regulatory-by-design TMS API.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /operations:
+    post:
+      operationId: createTransportOperation
+      tags: [Operations]
+      summary: Create a transport operation
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOperationRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationResponse' }
+  /trips/{tripId}/compliance:
+    post:
+      operationId: validateTripCompliance
+      tags: [Compliance]
+      summary: Execute the compliance gate for a trip
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Compliance result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceResponse' }
+  /trips/{tripId}/release:
+    post:
+      operationId: releaseTrip
+      tags: [Trips]
+      summary: Release a trip when mandatory compliance checks pass
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200': { description: Released }
+        '409': { description: Release blocked }
+  /regulatory/rules:
+    get:
+      operationId: listRegulatoryRules
+      tags: [Regulatory]
+      responses:
+        '200': { description: Rule list }
+  /evidence/packages/{packageId}:
+    get:
+      operationId: getEvidencePackage
+      tags: [Evidence]
+      parameters:
+        - name: packageId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Evidence package }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TripId:
+      name: tripId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 8, maxLength: 255 }
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema: { type: string, format: uuid }
+  schemas:
+    CreateOperationRequest:
+      type: object
+      required: [shipmentId, carrierId, driverId, vehicleId]
+      properties:
+        shipmentId: { type: string, format: uuid }
+        carrierId: { type: string, format: uuid }
+        driverId: { type: string, format: uuid }
+        vehicleId: { type: string, format: uuid }
+    OperationResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+    ComplianceResponse:
+      type: object
+      required: [caseId, result, evidencePackageId]
+      properties:
+        caseId: { type: string, format: uuid }
+        result: { type: string, enum: [PASS, WARNING, BLOCKED, EXPIRED, PENDING, UNKNOWN, NOT_VERIFIED] }
+        evidencePackageId: { type: string, format: uuid }
