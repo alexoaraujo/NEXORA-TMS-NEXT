@@ -1,16 +1,29 @@
 BEGIN;
 
--- Runtime application role. The CI test login (nexora_runtime_test) is a
--- separate login role and must SET ROLE to this non-login application role.
-DO $role$
+-- Neon role administration is an infrastructure concern. The database
+-- migration must validate the pre-provisioned nexora_app role instead of
+-- attempting CREATE/ALTER ROLE with a database owner that may not have
+-- CREATEROLE privileges.
+DO $$
+DECLARE
+  r record;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexora_app') THEN
-    CREATE ROLE nexora_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-  ELSE
-    ALTER ROLE nexora_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+  SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
+         rolreplication, rolbypassrls
+    INTO r
+  FROM pg_roles
+  WHERE rolname = 'nexora_app';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'required role nexora_app is not provisioned';
+  END IF;
+
+  IF r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolcanlogin
+     OR r.rolreplication OR r.rolbypassrls OR r.rolinherit THEN
+    RAISE EXCEPTION 'nexora_app has invalid security attributes';
   END IF;
 END
-$role$;
+$$;
 
 REVOKE ALL ON FUNCTION identity.package_belongs_to_current_tenant(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION identity.package_belongs_to_current_tenant(uuid) TO nexora_app;
