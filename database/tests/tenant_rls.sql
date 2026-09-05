@@ -1,13 +1,24 @@
 \set ON_ERROR_STOP on
 
--- P0.1 acceptance test. Execute against an isolated database after 0001 and 0002.
--- The test owns its fixtures and rolls them back at the end.
+-- P0.1 acceptance test. Execute against an isolated database after 0001-0007.
+-- Fixture rows are created by the privileged test connection, then all
+-- tenant-isolation assertions execute explicitly as nexora_app.
 
 BEGIN;
 
 INSERT INTO identity.tenant (id, name) VALUES
   ('00000000-0000-0000-0000-000000000001', 'Tenant A'),
   ('00000000-0000-0000-0000-000000000002', 'Tenant B');
+
+SET LOCAL ROLE nexora_app;
+
+DO $$
+BEGIN
+  IF current_user <> 'nexora_app' THEN
+    RAISE EXCEPTION 'P0.1 must execute tenant assertions as nexora_app, current_user=%', current_user;
+  END IF;
+END
+$$;
 
 SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true);
 INSERT INTO party.party (tenant_id, type, legal_name, tax_id)
