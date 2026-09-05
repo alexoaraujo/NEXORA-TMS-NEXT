@@ -28,6 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify migration files exist
-        run: test -s database/migrations/0001_foundation.sql
+        run: |
+          test -s database/migrations/0001_foundation.sql
+          test -s database/migrations/0002_tenant_rls.sql
+          test -s database/migrations/0003_p0_1_1_application_role.sql
+      - name: Verify RLS hardening invariants
+        run: |
+          grep -q 'NOBYPASSRLS' database/migrations/0003_p0_1_1_application_role.sql
+          grep -q 'NOSUPERUSER' database/migrations/0003_p0_1_1_application_role.sql
+          grep -q 'FORCE ROW LEVEL SECURITY' database/migrations/0003_p0_1_1_application_role.sql
+          grep -q 'tenant context' database/tests/p0_1_1_rls_hardening.sql
       - name: Reject accidental secret material
         run: '! grep -RInE "(BEGIN (RSA|OPENSSH) PRIVATE KEY|AKIA[0-9A-Z]{16}|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@)" --exclude-dir=.git .'
