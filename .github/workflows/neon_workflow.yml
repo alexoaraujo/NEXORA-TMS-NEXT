@@ -62,23 +62,31 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      - name: Apply database migrations
+      - name: Prepare preview database
         env:
           DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url }}
         shell: bash
         run: |
           set -euo pipefail
           test -n "$DATABASE_URL"
-          shopt -s nullglob
-          migrations=(database/migrations/*.sql)
-          test "${#migrations[@]}" -gt 0 || {
-            echo 'No SQL migrations found in database/migrations'
-            exit 1
-          }
-          for migration in "${migrations[@]}"; do
-            echo "Applying $migration"
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
-          done
+
+          if psql "$DATABASE_URL" -Atqc "SELECT to_regclass('identity.tenant') IS NOT NULL" | grep -qx t; then
+            echo 'Existing Neon branch baseline detected; do not replay foundation migrations.'
+            echo 'Applying only the idempotent runtime-role binding required by P0.2.'
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/migrations/0007_p0_2_runtime_role_binding.sql
+          else
+            echo 'Empty Neon database detected; applying migrations in order.'
+            shopt -s nullglob
+            migrations=(database/migrations/*.sql)
+            test "${#migrations[@]}" -gt 0 || {
+              echo 'No SQL migrations found in database/migrations'
+              exit 1
+            }
+            for migration in "${migrations[@]}"; do
+              echo "Applying $migration"
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+            done
+          fi
 
   delete_neon_branch:
     name: Delete Neon Branch
