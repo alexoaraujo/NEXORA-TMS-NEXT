@@ -4,8 +4,17 @@ SET LOCAL statement_timeout = '10s';
 
 DO $$
 BEGIN
-  IF current_user <> 'nexora_runtime_test' THEN
-    RAISE EXCEPTION 'P0.2 must run as nexora_runtime_test, current_user=%', current_user;
+  IF session_user <> 'nexora_runtime_test' THEN
+    RAISE EXCEPTION 'P0.2 must connect as nexora_runtime_test, session_user=%', session_user;
+  END IF;
+END $$;
+
+SET LOCAL ROLE nexora_app;
+
+DO $$
+BEGIN
+  IF current_user <> 'nexora_app' THEN
+    RAISE EXCEPTION 'P0.2 must execute as nexora_app, current_user=%', current_user;
   END IF;
   IF (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) THEN
     RAISE EXCEPTION 'runtime role is SUPERUSER';
