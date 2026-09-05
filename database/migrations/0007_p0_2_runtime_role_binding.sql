@@ -1,12 +1,12 @@
 BEGIN;
 
 -- P0.2 runtime roles are provisioned at the Neon infrastructure layer.
--- Migrations validate their security posture and establish only the database
--- membership/grants needed by the runtime test.
+-- The migration validates both roles and establishes only the membership and
+-- grants required by the runtime test.
 DO $$
 DECLARE
   app_role record;
-  login_role record;
+  runtime_role record;
 BEGIN
   SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
          rolreplication, rolbypassrls
@@ -24,13 +24,20 @@ BEGIN
     RAISE EXCEPTION 'nexora_app has invalid security attributes';
   END IF;
 
-  SELECT rolcanlogin
-    INTO login_role
+  SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
+         rolreplication, rolbypassrls
+    INTO runtime_role
   FROM pg_roles
   WHERE rolname = 'nexora_runtime_test';
 
-  IF NOT FOUND OR login_role.rolcanlogin IS NOT TRUE THEN
+  IF NOT FOUND OR runtime_role.rolcanlogin IS NOT TRUE THEN
     RAISE EXCEPTION 'required runtime login role nexora_runtime_test is not available';
+  END IF;
+
+  IF runtime_role.rolsuper OR runtime_role.rolinherit OR runtime_role.rolcreaterole
+     OR runtime_role.rolcreatedb OR runtime_role.rolreplication
+     OR runtime_role.rolbypassrls THEN
+    RAISE EXCEPTION 'nexora_runtime_test has forbidden security attributes';
   END IF;
 END
 $$;
