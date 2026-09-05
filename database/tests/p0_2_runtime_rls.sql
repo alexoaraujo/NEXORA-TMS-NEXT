@@ -52,8 +52,22 @@ CREATE TEMP TABLE p0_2_ids(id uuid, tenant_id uuid) ON COMMIT DROP;
 
 SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true);
 WITH ins AS (
-  INSERT INTO transport.order(tenant_id, status)
-  VALUES (identity.current_tenant_id(), 'DRAFT')
+  INSERT INTO transport.order(
+    tenant_id,
+    origin_city,
+    origin_state,
+    destination_city,
+    destination_state,
+    status
+  )
+  VALUES (
+    identity.current_tenant_id(),
+    'Santos',
+    'SP',
+    'São Paulo',
+    'SP',
+    'DRAFT'
+  )
   RETURNING id, tenant_id
 )
 INSERT INTO p0_2_ids SELECT * FROM ins;
@@ -91,8 +105,10 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true)
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO transport.order(tenant_id,status)
-    VALUES ('00000000-0000-0000-0000-000000000002','DRAFT');
+    INSERT INTO transport.order(
+      tenant_id, origin_city, origin_state, destination_city, destination_state, status
+    )
+    VALUES ('00000000-0000-0000-0000-000000000002','Santos','SP','São Paulo','SP','DRAFT');
     RAISE EXCEPTION 'cross-tenant INSERT unexpectedly succeeded';
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
@@ -104,8 +120,10 @@ RESET app.tenant_id;
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO transport.order(tenant_id,status)
-    VALUES ('00000000-0000-0000-0000-000000000001','DRAFT');
+    INSERT INTO transport.order(
+      tenant_id, origin_city, origin_state, destination_city, destination_state, status
+    )
+    VALUES ('00000000-0000-0000-0000-000000000001','Santos','SP','São Paulo','SP','DRAFT');
     RAISE EXCEPTION 'write without tenant context unexpectedly succeeded';
   EXCEPTION WHEN insufficient_privilege THEN
     NULL;
