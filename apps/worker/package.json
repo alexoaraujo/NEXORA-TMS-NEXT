@@ -1,0 +1,7 @@
+{
+  "name": "@nexora/worker",
+  "private": true,
+  "scripts": {"build":"tsc -p tsconfig.json","dev":"tsx watch src/main.ts","lint":"eslint .","typecheck":"tsc --noEmit -p tsconfig.json","test":"vitest run"},
+  "dependencies": {"pg":"^8.16.3"},
+  "devDependencies": {"@types/node":"^24.3.0","tsx":"^4.20.5","typescript":"^5.9.2","vitest":"^3.2.4"}
+}
