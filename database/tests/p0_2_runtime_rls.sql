@@ -9,9 +9,7 @@ SET LOCAL statement_timeout = '10s';
 
 DO $$
 BEGIN
-  IF session_user <> 'nexora_runtime_test' THEN
-    RAISE EXCEPTION 'P0.2 must connect as nexora_runtime_test, session_user=%', session_user;
-  END IF;
+  IF session_user <> 'nexora_runtime_test' THEN RAISE EXCEPTION 'P0.2 must connect as nexora_runtime_test, session_user=%', session_user; END IF;
 END
 $$;
 
@@ -101,22 +99,20 @@ BEGIN
 END
 $$;
 
-CREATE TEMP TABLE p0_2_new_package(id uuid) ON COMMIT DROP;
-CREATE TEMP TABLE p0_2_evidence(item_id uuid) ON COMMIT DROP;
-
 INSERT INTO evidence.package (tenant_id, subject_type, subject_id)
-VALUES (identity.current_tenant_id(), 'transport.order', (SELECT id FROM p0_2_ids))
-RETURNING id INTO p0_2_new_package;
+VALUES (identity.current_tenant_id(), 'transport.order', (SELECT id FROM p0_2_ids));
 
 INSERT INTO evidence.item (package_id, evidence_type, source_type, source_uri)
-SELECT id, 'TEST', 'TEST', 'test://p0-2'
-FROM p0_2_new_package
-RETURNING id INTO p0_2_evidence;
+SELECT p.id, 'TEST', 'TEST', 'test://p0-2'
+FROM evidence.package p
+WHERE p.tenant_id=identity.current_tenant_id()
+  AND p.subject_type='transport.order'
+  AND p.subject_id=(SELECT id FROM p0_2_ids);
 
 DO $$
 BEGIN
-  IF (SELECT count(*) FROM evidence.package WHERE id=(SELECT id FROM p0_2_new_package)) <> 1 THEN RAISE EXCEPTION 'canonical evidence.package missing'; END IF;
-  IF (SELECT count(*) FROM evidence.item WHERE id=(SELECT item_id FROM p0_2_evidence)) <> 1 THEN RAISE EXCEPTION 'canonical evidence.item missing'; END IF;
+  IF (SELECT count(*) FROM evidence.package WHERE tenant_id=identity.current_tenant_id() AND subject_id=(SELECT id FROM p0_2_ids)) <> 1 THEN RAISE EXCEPTION 'canonical evidence.package missing'; END IF;
+  IF (SELECT count(*) FROM evidence.item i JOIN evidence.package p ON p.id=i.package_id WHERE p.tenant_id=identity.current_tenant_id() AND p.subject_id=(SELECT id FROM p0_2_ids)) <> 1 THEN RAISE EXCEPTION 'canonical evidence.item missing'; END IF;
 END
 $$;
 
