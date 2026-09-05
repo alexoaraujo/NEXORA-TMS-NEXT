@@ -1,56 +1,93 @@
+\set ON_ERROR_STOP on
+
 -- Execute as nexora_app (not the migration/owner role) against an isolated database.
--- The script raises on every isolation violation.
+-- P0.1 owns behavioral tenant-isolation fixtures; this suite validates the
+-- application role, RLS metadata, FORCE RLS, and canonical policies.
 
 BEGIN;
 
-CREATE TEMP TABLE rls_test_result (name text PRIMARY KEY, passed boolean NOT NULL, detail text);
-
-SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true);
-INSERT INTO rls_test_result
-SELECT 'A sees A', count(*) = 1, 'expected exactly one A row'
-FROM party.party WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
-INSERT INTO rls_test_result
-SELECT 'A cannot see B', count(*) = 0, 'expected zero B rows'
-FROM party.party WHERE tenant_id = '00000000-0000-0000-0000-000000000002';
-
-SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000002', true);
-INSERT INTO rls_test_result
-SELECT 'B sees B', count(*) = 1, 'expected exactly one B row'
-FROM party.party WHERE tenant_id = '00000000-0000-0000-0000-000000000002';
-INSERT INTO rls_test_result
-SELECT 'B cannot see A', count(*) = 0, 'expected zero A rows'
-FROM party.party WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
-
-UPDATE party.party SET legal_name = 'CROSS TENANT FORBIDDEN'
-WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
-IF FOUND THEN RAISE EXCEPTION 'FAIL: cross-tenant update affected a row'; END IF;
-
+DO $$
+DECLARE
+  required_tables text[] := ARRAY[
+    'party.party',
+    'party.carrier',
+    'fleet.driver',
+    'fleet.vehicle',
+    'transport.order',
+    'transport.shipment',
+    'transport.operation',
+    'transport.trip',
+    'compliance.case',
+    'evidence.package',
+    'evidence.item',
+    'audit.event',
+    'event.outbox',
+    'integration.idempotency_key'
+  ];
+  qualified_name text;
+  schema_name text;
+  table_name text;
+  rel record;
 BEGIN
-  INSERT INTO party.party (id, tenant_id, type, legal_name, tax_id)
-  VALUES ('30000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','CUSTOMER','CROSS TENANT FORBIDDEN','FORBIDDEN');
-  RAISE EXCEPTION 'FAIL: cross-tenant insert was accepted';
-EXCEPTION WHEN insufficient_privilege THEN
-  NULL;
-END;
+  IF current_user <> 'nexora_app' THEN
+    RAISE EXCEPTION 'P0.1.1 must execute as nexora_app, current_user=%', current_user;
+  END IF;
 
-SELECT set_config('app.tenant_id', '', true);
-BEGIN
-  INSERT INTO party.party (id, tenant_id, type, legal_name, tax_id)
-  VALUES ('40000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000002','CUSTOMER','NO CONTEXT','NO-CONTEXT');
-  RAISE EXCEPTION 'FAIL: insert without tenant context was accepted';
-EXCEPTION WHEN insufficient_privilege THEN
-  NULL;
-END;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = 'nexora_app'
+      AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication OR rolcanlogin)
+  ) THEN
+    RAISE EXCEPTION 'nexora_app has forbidden role attributes';
+  END IF;
 
-IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='nexora_app' AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb))
-THEN RAISE EXCEPTION 'FAIL: nexora_app has forbidden administrative privileges'; END IF;
+  FOREACH qualified_name IN ARRAY required_tables LOOP
+    schema_name := split_part(qualified_name, '.', 1);
+    table_name := split_part(qualified_name, '.', 2);
 
-IF EXISTS (
-  SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-  WHERE n.nspname IN ('party','fleet','transport','compliance','evidence','audit','event','integration')
-    AND c.relrowsecurity IS NOT TRUE
-)
-THEN RAISE EXCEPTION 'FAIL: a tenant-scoped table has RLS disabled'; END IF;
+    SELECT c.relrowsecurity, c.relforcerowsecurity
+      INTO rel
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = schema_name
+      AND c.relname = table_name
+      AND c.relkind IN ('r', 'p');
 
-SELECT * FROM rls_test_result ORDER BY name;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'required table does not exist: %', qualified_name;
+    END IF;
+
+    IF rel.relrowsecurity IS NOT TRUE THEN
+      RAISE EXCEPTION 'RLS disabled: %', qualified_name;
+    END IF;
+
+    IF rel.relforcerowsecurity IS NOT TRUE THEN
+      RAISE EXCEPTION 'FORCE RLS disabled: %', qualified_name;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies p
+      WHERE p.schemaname = schema_name
+        AND p.tablename = table_name
+    ) THEN
+      RAISE EXCEPTION 'no RLS policy defined: %', qualified_name;
+    END IF;
+  END LOOP;
+
+  IF to_regclass('audit.audit_event') IS NOT NULL
+     OR to_regclass('outbox.event') IS NOT NULL
+     OR to_regclass('evidence.evidence') IS NOT NULL THEN
+    RAISE EXCEPTION 'legacy competing objects are present';
+  END IF;
+END
+$$;
+
+SELECT
+  current_user AS current_user,
+  (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS rolsuper,
+  (SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) AS rolbypassrls;
+
 ROLLBACK;
+\echo 'P0.1.1 RLS hardening suite: PASS'
