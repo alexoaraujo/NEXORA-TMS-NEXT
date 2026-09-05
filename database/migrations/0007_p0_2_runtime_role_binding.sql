@@ -1,38 +1,44 @@
 BEGIN;
 
--- P0.2 runtime binding is intentionally explicit. The Neon login role is
--- provisioned outside the schema migration; fail clearly if it is absent.
+-- P0.2 runtime roles are provisioned at the Neon infrastructure layer.
+-- Migrations validate their security posture and establish only the database
+-- membership/grants needed by the runtime test.
 DO $$
+DECLARE
+  app_role record;
+  login_role record;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexora_runtime_test') THEN
-    RAISE EXCEPTION 'required runtime login role nexora_runtime_test does not exist';
+  SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
+         rolreplication, rolbypassrls
+    INTO app_role
+  FROM pg_roles
+  WHERE rolname = 'nexora_app';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'required role nexora_app is not provisioned';
+  END IF;
+
+  IF app_role.rolsuper OR app_role.rolinherit OR app_role.rolcreaterole
+     OR app_role.rolcreatedb OR app_role.rolcanlogin
+     OR app_role.rolreplication OR app_role.rolbypassrls THEN
+    RAISE EXCEPTION 'nexora_app has invalid security attributes';
+  END IF;
+
+  SELECT rolcanlogin
+    INTO login_role
+  FROM pg_roles
+  WHERE rolname = 'nexora_runtime_test';
+
+  IF NOT FOUND OR login_role.rolcanlogin IS NOT TRUE THEN
+    RAISE EXCEPTION 'required runtime login role nexora_runtime_test is not available';
   END IF;
 END
 $$;
 
-DO $role$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexora_app') THEN
-    CREATE ROLE nexora_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-  ELSE
-    ALTER ROLE nexora_app
-      NOLOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOINHERIT
-      NOREPLICATION
-      NOBYPASSRLS;
-  END IF;
-END
-$role$;
-
 GRANT nexora_app TO nexora_runtime_test;
 
 GRANT USAGE ON SCHEMA identity, party, fleet, transport, compliance, evidence, audit, event, integration TO nexora_app;
-
 GRANT SELECT ON identity.tenant TO nexora_app;
-
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   party.party,
   party.carrier,
@@ -50,8 +56,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   integration.idempotency_key
 TO nexora_app;
 
--- UUID-backed tables do not require sequence privileges, but retain explicit
--- sequence grants for future sequence-backed additions to these schemas.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA party, fleet, transport, compliance, evidence, audit, event, integration TO nexora_app;
 
 DO $$
